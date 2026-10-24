@@ -1,0 +1,36 @@
+name: ADCM guardrails
+description: Check this repository against the ADCM agent golden baseline published with this action.
+inputs:
+  fail-on:
+    description: Lowest drift severity that fails the job (high, medium or low)
+    required: false
+    default: high
+  path:
+    description: Repository root to check
+    required: false
+    default: .
+outputs:
+  report:
+    description: Path to the JSON report
+    value: ${{ steps.check.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Install engine dependencies (hash-pinned)
+      shell: bash
+      run: |
+        python3 -m venv "$RUNNER_TEMP/adcm-guardrails"
+        "$RUNNER_TEMP/adcm-guardrails/bin/python" -m pip install --quiet --disable-pip-version-check \
+          --require-hashes --no-deps -r "$GITHUB_ACTION_PATH/requirements.txt"
+    - name: Check against the golden baseline
+      id: check
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        TARGET: ${{ inputs.path }}
+      run: |
+        report="$RUNNER_TEMP/adcm-guardrails-report.json"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        PYTHONPATH="$GITHUB_ACTION_PATH" "$RUNNER_TEMP/adcm-guardrails/bin/python" -m guardrails check \
+          --path "$TARGET" --baseline "$GITHUB_ACTION_PATH/../../../agent-baseline.json" \
+          --fail-on "$FAIL_ON" --format github --output "$report"

@@ -1,0 +1,191 @@
+{
+  "schema": "adcm.guardrails.baseline/v1",
+  "id": "adcm-agent-baseline",
+  "version": "1.0.0",
+  "released": "2026-10-25",
+  "description": "Approved security and governance configuration for AI agent repositories. Repository controls follow the ISD EAG golden repository; agent controls add identity, model, tool, telemetry and evaluation requirements that ADCM can verify.",
+  "derived_from": "mcaps-microsoft/isd-eag-sec-ai-golden-repo baseline 2026.09.10.2",
+  "settings": {
+    "manifest_paths": ["adcm-agent.yaml", ".adcm/agent.yaml"],
+    "approved_models": ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-5-mini"],
+    "data_classifications": ["public", "general", "confidential", "highly_confidential"],
+    "approved_tool_types": ["mcp", "openapi", "function", "azure_ai_search", "file_search", "code_interpreter"],
+    "approved_mcp_hosts": ["learn.microsoft.com", "mcp.svc.cloud.microsoft", "*.azure-api.net", "api.githubcopilot.com"]
+  },
+  "rules": [
+    {
+      "id": "GR-SEC-001", "title": "No committed secrets", "category": "security", "severity": "high",
+      "check": "secrets_absent",
+      "rationale": "Secrets in source are exposed to every reader and every fork, and survive in git history.",
+      "remediation": "Remove the secret, rotate it, and load it at runtime from Key Vault through a managed identity."
+    },
+    {
+      "id": "GR-SEC-002", "title": "Secret scanning in CI", "category": "security", "severity": "high",
+      "check": "workflow_uses_action", "params": {"any_of": ["gitleaks/gitleaks-action", "trufflesecurity/trufflehog"]},
+      "rationale": "Secret scanning on every push and pull request stops credentials before they reach the default branch.",
+      "remediation": "Add the golden repo secret-scan workflow (gitleaks, SHA-pinned) and make it a required check."
+    },
+    {
+      "id": "GR-SEC-003", "title": "Actions pinned to commit SHAs", "category": "security", "severity": "high",
+      "check": "workflow_actions_pinned",
+      "rationale": "Tags are mutable; a compromised action tag runs attacker code with the workflow token.",
+      "remediation": "Pin every third-party action to a full 40-character commit SHA and let Dependabot update it."
+    },
+    {
+      "id": "GR-SEC-004", "title": "Least-privilege workflow tokens", "category": "security", "severity": "medium",
+      "check": "workflow_permissions",
+      "rationale": "Without an explicit permissions block the GITHUB_TOKEN may get write access to the repository.",
+      "remediation": "Add a top-level 'permissions: contents: read' to every workflow and grant writes per job only."
+    },
+    {
+      "id": "GR-SEC-005", "title": "OIDC federation instead of long-lived cloud secrets", "category": "security", "severity": "high",
+      "check": "workflow_no_long_lived_secrets",
+      "params": {"secret_names": ["AZURE_CREDENTIALS", "AZURE_CLIENT_SECRET", "ARM_CLIENT_SECRET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GCP_SA_KEY", "GOOGLE_CREDENTIALS"]},
+      "rationale": "Stored cloud credentials are long-lived and shared; workload identity federation issues short-lived tokens per run.",
+      "remediation": "Use azure/login with client-id, tenant-id and subscription-id (OIDC) and a federated credential on the deployment identity."
+    },
+    {
+      "id": "GR-SEC-006", "title": "Keyless model and service authentication", "category": "security", "severity": "high",
+      "check": "pattern_absent",
+      "params": {
+        "patterns": ["AzureKeyCredential\\(", "AZURE_OPENAI_API_KEY", "api_key\\s*=\\s*os\\.(environ|getenv)", "new AzureKeyCredential\\("],
+        "extensions": [".py", ".ts", ".js", ".mjs", ".cs"]
+      },
+      "rationale": "API keys cannot be attributed to an agent, are hard to rotate, and bypass Conditional Access and identity governance.",
+      "remediation": "Authenticate with DefaultAzureCredential or the agent's Entra Agent ID, and disable local (key) auth on the resource."
+    },
+    {
+      "id": "GR-SEC-007", "title": "No shadow AI proxy", "category": "security", "severity": "high",
+      "check": "dependency_forbidden", "params": {"names": ["litellm"]},
+      "rationale": "Self-hosted model proxies bypass the approved AI gateway, its content safety, identity and inventory, and have been targeted by supply-chain attacks.",
+      "remediation": "Call models through the Foundry project or the approved API Management AI gateway instead of an embedded proxy."
+    },
+    {
+      "id": "GR-SEC-008", "title": "Runs as an Entra Agent ID", "category": "security", "severity": "high",
+      "check": "manifest_identity", "params": {"type": "entra_agent_id"},
+      "rationale": "Agent identities are governable as agents: sponsor, lifecycle, Conditional Access and kill switch.",
+      "remediation": "Create an agent identity from an approved blueprint and declare identity.type: entra_agent_id with its blueprint_id."
+    },
+    {
+      "id": "GR-SEC-009", "title": "Approved model", "category": "security", "severity": "medium",
+      "check": "manifest_models",
+      "rationale": "Approved models have completed security, privacy and responsible-AI review.",
+      "remediation": "Use a model deployment from the approved list, or request review of the new model."
+    },
+    {
+      "id": "GR-SEC-010", "title": "Content safety enabled", "category": "security", "severity": "high",
+      "check": "manifest_content_safety",
+      "rationale": "Content filters and prompt-shield protections reduce jailbreak and harmful-output risk.",
+      "remediation": "Attach a content filter (RAI) policy to the deployment and declare model.content_safety.enabled: true."
+    },
+    {
+      "id": "GR-SEC-011", "title": "Tool allow-list and human approval for writes", "category": "security", "severity": "high",
+      "check": "manifest_tools",
+      "rationale": "Unvetted tools and MCP servers extend the agent's reach; write actions need a human in the loop.",
+      "remediation": "Use approved tool types and MCP hosts only, and set approval: required on every write-capable tool."
+    },
+    {
+      "id": "GR-SEC-012", "title": "Code scanning (CodeQL)", "category": "security", "severity": "medium",
+      "check": "workflow_uses_action", "params": {"any_of": ["github/codeql-action"]},
+      "rationale": "Static analysis finds injection and unsafe deserialisation before release.",
+      "remediation": "Add the golden repo CodeQL workflow."
+    },
+    {
+      "id": "GR-SEC-013", "title": "Dependabot updates", "category": "security", "severity": "medium",
+      "check": "file_exists", "params": {"any_of": [".github/dependabot.yml", ".github/dependabot.yaml"]},
+      "rationale": "Automated update PRs keep dependencies and pinned action SHAs patched.",
+      "remediation": "Add .github/dependabot.yml for your package ecosystem and github-actions."
+    },
+    {
+      "id": "GR-SEC-014", "title": "Locked dependencies", "category": "security", "severity": "medium",
+      "check": "lockfile_present",
+      "rationale": "Lockfiles make builds reproducible and stop silent upgrades to compromised versions.",
+      "remediation": "Commit uv.lock, poetry.lock, hash-pinned requirements or package-lock.json."
+    },
+    {
+      "id": "GR-SEC-015", "title": "SBOM produced in CI", "category": "security", "severity": "low",
+      "check": "workflow_uses_action", "params": {"any_of": ["anchore/sbom-action", "actions/attest-sbom", "actions/attest-build-provenance"]},
+      "rationale": "A software bill of materials and provenance attestation let you answer 'are we affected?' quickly.",
+      "remediation": "Add the golden repo SBOM workflow."
+    },
+    {
+      "id": "GR-SEC-016", "title": "Signed head commit", "category": "security", "severity": "low",
+      "check": "head_commit_signed",
+      "rationale": "Verified signatures tie default-branch history to an authenticated author.",
+      "remediation": "Sign commits (SSH or GPG) and enable 'Require signed commits' in the branch ruleset."
+    },
+    {
+      "id": "GR-SEC-017", "title": "Deployed agent matches the declared configuration", "category": "security", "severity": "high",
+      "check": "deployed_drift",
+      "rationale": "Changes made directly in the portal bypass review: a different model, extra tools or another identity.",
+      "remediation": "Redeploy from the repository, or update the manifest through a reviewed pull request."
+    },
+    {
+      "id": "GR-GOV-001", "title": "Agent manifest", "category": "governance", "severity": "high",
+      "check": "manifest_valid",
+      "rationale": "The manifest declares owner, sponsor, data classification, identity, model, tools and deployments so they can be verified.",
+      "remediation": "Add adcm-agent.yaml from the golden baseline template and fill in every field."
+    },
+    {
+      "id": "GR-GOV-002", "title": "Code owners", "category": "governance", "severity": "medium",
+      "check": "file_exists", "params": {"any_of": [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"]},
+      "rationale": "Code owners make review responsibility explicit and enforceable.",
+      "remediation": "Add .github/CODEOWNERS and require code owner review."
+    },
+    {
+      "id": "GR-GOV-003", "title": "Security policy", "category": "governance", "severity": "low",
+      "check": "file_exists", "params": {"any_of": ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]},
+      "rationale": "Reporters need a private channel for vulnerabilities.",
+      "remediation": "Add SECURITY.md from the golden repo."
+    },
+    {
+      "id": "GR-GOV-004", "title": "Pull request template", "category": "governance", "severity": "low",
+      "check": "file_exists", "params": {"any_of": [".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE.md", "pull_request_template.md"]},
+      "rationale": "A template prompts authors for risk, testing and data-handling evidence.",
+      "remediation": "Add .github/pull_request_template.md from the golden repo."
+    },
+    {
+      "id": "GR-GOV-005", "title": "Protected default branch", "category": "governance", "severity": "high",
+      "check": "branch_rules",
+      "params": {"min_approvals": 1, "code_owner_review": true, "required_checks": ["guardrails"], "block_force_push": true, "block_deletion": true, "signed_commits": true},
+      "rationale": "Reviews and required checks only gate changes when the branch enforces them.",
+      "remediation": "Apply the golden ruleset: 1 approval, code owner review, required 'guardrails' check, signed commits, no force push or deletion."
+    },
+    {
+      "id": "GR-GOV-006", "title": "Approved agent SDK at a supported version", "category": "governance", "severity": "medium",
+      "check": "dependency_required",
+      "params": {"any_of": [
+        {"name": "azure-ai-projects", "min_version": "1.0.0"},
+        {"name": "azure-ai-agents", "min_version": "1.1.0"},
+        {"name": "agent-framework", "min_version": "1.0.0b1"},
+        {"name": "@azure/ai-projects", "min_version": "1.0.0"}
+      ]},
+      "rationale": "Supported SDKs carry identity, tracing and security fixes that older or unofficial clients lack.",
+      "remediation": "Depend on azure-ai-projects, azure-ai-agents or Microsoft Agent Framework at or above the minimum version."
+    },
+    {
+      "id": "GR-GOV-007", "title": "Telemetry enabled", "category": "governance", "severity": "medium",
+      "check": "dependency_any", "params": {"any_of": ["azure-monitor-opentelemetry", "opentelemetry-sdk", "@azure/monitor-opentelemetry"]},
+      "rationale": "Traces make agent behaviour observable for investigation, evaluation and kill-switch decisions.",
+      "remediation": "Add azure-monitor-opentelemetry and call configure_azure_monitor() at startup."
+    },
+    {
+      "id": "GR-GOV-008", "title": "Evaluations run in CI", "category": "governance", "severity": "medium",
+      "check": "evals_in_ci", "params": {"path": "evals/"},
+      "rationale": "Quality and safety evaluations catch regressions before deployment.",
+      "remediation": "Add datasets under evals/ and run them from a workflow on pull requests."
+    },
+    {
+      "id": "GR-GOV-009", "title": "Guardrails gate in CI", "category": "governance", "severity": "medium",
+      "check": "workflow_uses_action", "params": {"any_of": ["*/.github/actions/adcm-guardrails"]},
+      "rationale": "Running the same baseline check on every pull request stops drift before merge.",
+      "remediation": "Add the adcm-guardrails action from the golden baseline repository as a required 'guardrails' check."
+    },
+    {
+      "id": "GR-GOV-010", "title": "Current baseline version", "category": "governance", "severity": "medium",
+      "check": "manifest_baseline_pin",
+      "rationale": "Pinning the baseline makes upgrades deliberate; falling behind means missing newer controls.",
+      "remediation": "Review the baseline changelog and update baseline_version in adcm-agent.yaml."
+    }
+  ]
+}

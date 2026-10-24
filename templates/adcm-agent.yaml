@@ -1,0 +1,28 @@
+# ADCM agent manifest. ADCM and the guardrails action verify every field.
+schema: adcm.agent/v1
+name: my-agent
+description: What the agent does, in one sentence.
+baseline_version: 1.0.0
+owner: owner@contoso.com
+sponsor: sponsor@contoso.com
+data_classification: general
+identity:
+  type: entra_agent_id
+  blueprint_id: 00000000-0000-0000-0000-000000000000
+model:
+  deployment: gpt-4o-mini
+  content_safety:
+    enabled: true
+    rai_policy: Microsoft.DefaultV2
+tools:
+  - name: microsoft_learn
+    type: mcp
+    endpoint: https://learn.microsoft.com/api/mcp
+    write: false
+    approval: none
+telemetry:
+  enabled: true
+deployments:
+  - platform: foundry
+    project_endpoint: https://my-account.services.ai.azure.com/api/projects/my-project
+    agent_name: my-agent

@@ -1,0 +1,17 @@
+name: guardrails
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@0000000000000000000000000000000000000000 # v1.0.0
+        with:
+          fail-on: high
