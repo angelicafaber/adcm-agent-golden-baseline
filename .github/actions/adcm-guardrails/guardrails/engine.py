@@ -7,8 +7,8 @@ from typing import Any
 
 from . import ENGINE_VERSION
 from .baseline import SEVERITY_RANK, Baseline
-from .checks import CHECKS, FAIL, NOT_EVALUATED, PASS, CheckContext, deployed_outcome
-from .manifest import MAX_TOOLS, Manifest, ManifestError, https_origin, parse_manifest
+from .checks import CHECKS, FAIL, NOT_EVALUATED, PASS, CheckContext, Outcome, deployed_auth_outcome, deployed_outcome
+from .manifest import INVOCATIONS, MAX_TOOLS, TOOL_AUTH, Manifest, ManifestError, https_origin, parse_manifest
 from .snapshot import RepoSnapshot
 
 RISK_LEVELS = ("none", "low", "medium", "high")
@@ -54,6 +54,7 @@ def _declared(manifest: Manifest | None) -> dict[str, Any] | None:
     return {
         "model": model if isinstance(model, str) else None,
         "identity_type": identity if isinstance(identity, str) else None,
+        "invocation": manifest.data.get("invocation") if manifest.data.get("invocation") in INVOCATIONS else None,
         "tools": [
             {
                 "name": str(tool.get("name"))[:100],
@@ -61,6 +62,7 @@ def _declared(manifest: Manifest | None) -> dict[str, Any] | None:
                 "endpoint": https_origin(tool.get("endpoint")),
                 "approval": tool.get("approval") if tool.get("approval") in ("required", "none") else None,
                 "write": tool.get("write") is True,
+                "auth": tool.get("auth") if tool.get("auth") in TOOL_AUTH else None,
             }
             for tool in manifest.tools[:MAX_TOOLS] if isinstance(tool.get("name"), str)
         ],
@@ -125,9 +127,15 @@ def evaluate(
 
 def apply_deployed(report: dict[str, Any], deployed: list[dict[str, Any]]) -> dict[str, Any]:
     """Re-evaluate declared-vs-deployed rules once the deployed inventory is known."""
-    outcome = deployed_outcome(deployed, report.get("manifest") is not None and not report.get("manifest_error"))
+    has_manifest = report.get("manifest") is not None and not report.get("manifest_error")
+    outcomes = {
+        "deployed_drift": deployed_outcome(deployed, has_manifest),
+        "deployed_auth": deployed_auth_outcome(deployed, (report.get("declared") or {}).get("invocation")) if has_manifest
+        else Outcome(NOT_EVALUATED, "No valid manifest declares deployments", []),
+    }
     for finding in report["findings"]:
-        if finding.get("check") == "deployed_drift":
+        outcome = outcomes.get(finding.get("check"))
+        if outcome is not None:
             finding.update(status=outcome.status, message=outcome.message, evidence=outcome.evidence)
     report["deployed"] = deployed
     return _summarize(report)

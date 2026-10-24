@@ -120,12 +120,20 @@ _PARAM_SPECS: dict[str, dict[str, Any]] = {
     "manifest_baseline_pin": {},
     "evals_in_ci": {"path": _directory},
     "deployed_drift": {},
+    "manifest_auth_flow": {},
+    "code_auth_flow": {
+        "app_only_patterns": _regexes,
+        "obo_patterns": _regexes,
+        "extensions": lambda v, n: _strings(v, n, re.compile(r"\.[a-z0-9]{1,10}")),
+    },
+    "deployed_auth": {},
 }
 CHECK_TYPES = frozenset(_PARAM_SPECS)
 _REQUIRED_PARAMS = {
     "file_exists": {"any_of"}, "workflow_uses_action": {"any_of"}, "dependency_required": {"any_of"},
     "dependency_forbidden": {"names"}, "dependency_any": {"any_of"}, "pattern_absent": {"patterns", "extensions"},
     "manifest_identity": {"type"}, "evals_in_ci": {"path"},
+    "code_auth_flow": {"app_only_patterns", "obo_patterns", "extensions"},
 }
 
 

@@ -1,8 +1,8 @@
 {
   "schema": "adcm.guardrails.baseline/v1",
   "id": "adcm-agent-baseline",
-  "version": "1.0.0",
-  "released": "2026-10-25",
+  "version": "1.1.0",
+  "released": "2026-10-27",
   "description": "Approved security and governance configuration for AI agent repositories. Repository controls follow the ISD EAG golden repository; agent controls add identity, model, tool, telemetry and evaluation requirements that ADCM can verify.",
   "derived_from": "mcaps-microsoft/isd-eag-sec-ai-golden-repo baseline 2026.09.10.2",
   "settings": {
@@ -186,6 +186,27 @@
       "check": "manifest_baseline_pin",
       "rationale": "Pinning the baseline makes upgrades deliberate; falling behind means missing newer controls.",
       "remediation": "Review the baseline changelog and update baseline_version in adcm-agent.yaml."
+    },
+    {
+      "id": "GR-AUTH-001", "title": "Tools act on behalf of the user (delegated / OBO)", "category": "security", "severity": "high",
+      "check": "manifest_auth_flow",
+      "rationale": "With delegated (on-behalf-of) tokens the signed-in user's identity carries through to every API call, so the target's logs prove who acted. With app-only (client credentials) tokens the logs show only the app or managed identity and the person disappears from the audit trail.",
+      "remediation": "Declare invocation: interactive or autonomous, and auth: delegated, app_only or none on every tool. Interactive agents use delegated (OBO) access for every tool; app-only is reserved for autonomous agents that run under their own agent identity and sponsor."
+    },
+    {
+      "id": "GR-AUTH-002", "title": "User-facing code uses on-behalf-of, not client credentials", "category": "security", "severity": "high",
+      "check": "code_auth_flow", "params": {
+        "app_only_patterns": ["acquire_token_for_client", "AcquireTokenForClient", "ClientSecretCredential\\(", "ClientCertificateCredential\\(", "grant_type=client_credentials", "[\"']client_credentials[\"']"],
+        "obo_patterns": ["acquire_token_on_behalf_of", "AcquireTokenOnBehalfOf", "OnBehalfOfCredential", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+        "extensions": [".py", ".ts", ".js", ".cs", ".java", ".go"]},
+      "rationale": "Code that requests client-credentials tokens while serving a user turns every call into an app call: even with every standard log enabled, there is no provable trail back to the person.",
+      "remediation": "Exchange the user's incoming token with the on-behalf-of flow (MSAL acquire_token_on_behalf_of or azure-identity OnBehalfOfCredential) before calling downstream APIs. DefaultAzureCredential remains fine for the agent's own platform and model calls."
+    },
+    {
+      "id": "GR-AUTH-003", "title": "User-facing agent identity holds no application permissions", "category": "security", "severity": "high",
+      "check": "deployed_auth",
+      "rationale": "Application permissions granted in Entra let the deployed agent act without any user, whatever the code declares, so its access can no longer be attributed to a person.",
+      "remediation": "Remove application permission (app role) assignments from the agent identity and grant the equivalent delegated permissions, or reclassify the agent as autonomous with an accountable sponsor."
     }
   ]
 }

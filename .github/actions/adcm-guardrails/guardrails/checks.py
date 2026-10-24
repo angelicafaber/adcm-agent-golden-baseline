@@ -15,7 +15,7 @@ from typing import Any, Callable
 import yaml
 
 from .baseline import Baseline, Rule, version_tuple
-from .manifest import Manifest, https_origin
+from .manifest import INVOCATIONS, TOOL_AUTH, Manifest, https_origin
 from .snapshot import LOCK_FILES, SECRET_FILE_NAMES, SECRET_FILE_SUFFIXES, RepoSnapshot, is_workflow
 
 PASS, FAIL, NOT_EVALUATED = "pass", "fail", "not_evaluated"
@@ -500,26 +500,119 @@ def check_manifest_baseline_pin(ctx: CheckContext, rule: Rule) -> Outcome:
     return Outcome(PASS, f"Pinned to current baseline {pinned}", [])
 
 
+def _config_differences(item: dict[str, Any]) -> list[str]:
+    auth = set(item.get("auth_differences") or [])
+    return [d for d in item.get("differences") or [] if d not in auth]
+
+
 def deployed_outcome(deployed: list[dict[str, Any]] | None, has_manifest: bool) -> Outcome:
-    """Outcome for declared-vs-deployed drift; shared by the check and ADCM's post-inventory pass."""
+    """Outcome for declared-vs-deployed drift; shared by the check and ADCM's post-inventory pass.
+
+    Authentication differences are reported by the deployed_auth rule instead, so one change
+    is not counted twice."""
     if deployed is None:
         return Outcome(NOT_EVALUATED, "Declared-vs-deployed drift is evaluated by ADCM against the discovered inventory", [])
     if not has_manifest:
         return Outcome(NOT_EVALUATED, "No valid manifest declares deployments", [])
     if not deployed:
         return Outcome(NOT_EVALUATED, "Manifest declares no deployments", [])
-    drift = [item for item in deployed if item.get("status") == "drift"]
-    matched = [item for item in deployed if item.get("status") == "match"]
+    drift = [item for item in deployed if item.get("status") != "missing" and _config_differences(item)]
+    found = [item for item in deployed if item.get("status") != "missing"]
     if drift:
-        evidence = [f"{item['deployment']}: {d}" for item in drift for d in item.get("differences") or []]
+        evidence = [f"{item['deployment']}: {d}" for item in drift for d in _config_differences(item)]
         return Outcome(FAIL, f"{len(drift)} deployment(s) differ from the declared configuration", _cap(evidence))
-    if matched:
-        return Outcome(PASS, f"{len(matched)} deployment(s) match the declared configuration", [i["deployment"] for i in matched][:MAX_EVIDENCE])
+    if found:
+        return Outcome(PASS, f"{len(found)} deployment(s) match the declared configuration", [i["deployment"] for i in found][:MAX_EVIDENCE])
     return Outcome(NOT_EVALUATED, "Declared deployments were not found in the latest inventory", [i["deployment"] for i in deployed][:MAX_EVIDENCE])
+
+
+def deployed_auth_outcome(deployed: list[dict[str, Any]] | None, invocation: str | None) -> Outcome:
+    """Does the deployed identity hold app-only permissions that hide the user (interactive agents)?"""
+    if deployed is None:
+        return Outcome(NOT_EVALUATED, "Deployed permissions are evaluated by ADCM against the discovered identities", [])
+    if invocation not in ("interactive", "autonomous"):
+        return Outcome(NOT_EVALUATED, "The manifest does not declare invocation, so the expected auth flow is unknown", [])
+    found = [item for item in deployed if item.get("status") != "missing"]
+    if not found:
+        return Outcome(NOT_EVALUATED, "No declared deployment was found in the latest inventory", [])
+    if invocation == "autonomous":
+        return Outcome(PASS, "Autonomous agent: application permissions are expected and attributed to the agent identity", [])
+    hits = [f"{item['deployment']}: {d}" for item in found for d in item.get("auth_differences") or []]
+    if hits:
+        return Outcome(FAIL, "A user-facing agent's identity holds application (app-only) permissions", _cap(hits))
+    return Outcome(PASS, f"{len(found)} deployed identit{'y holds' if len(found) == 1 else 'ies hold'} no application permissions", [])
 
 
 def check_deployed_drift(ctx: CheckContext, rule: Rule) -> Outcome:
     return deployed_outcome(ctx.deployed, ctx.manifest is not None and not ctx.manifest_error)
+
+
+def _invocation(ctx: CheckContext) -> str | None:
+    value = ctx.manifest.data.get("invocation") if ctx.manifest else None
+    return value if value in INVOCATIONS else None
+
+
+def check_manifest_auth_flow(ctx: CheckContext, rule: Rule) -> Outcome:
+    missing = _manifest_required(ctx)
+    if missing:
+        return missing
+    assert ctx.manifest is not None
+    invocation = _invocation(ctx)
+    problems = []
+    if invocation is None:
+        problems.append("declare invocation: interactive (acts for a signed-in user) or autonomous (no user)")
+    for tool in ctx.manifest.tools:
+        name = str(tool.get("name"))[:60]
+        auth = tool.get("auth")
+        if auth not in TOOL_AUTH:
+            problems.append(f"{name}: declare auth: delegated (on behalf of the user), app_only or none")
+        elif auth == "app_only" and invocation == "interactive":
+            problems.append(f"{name}: runs as the app, so the signed-in user is not in the token or the target's audit logs")
+    if problems:
+        return Outcome(FAIL, "Tool calls do not carry the user's identity", _cap(problems))
+    if invocation == "autonomous":
+        app_only = sum(1 for t in ctx.manifest.tools if t.get("auth") == "app_only")
+        return Outcome(PASS, f"Autonomous agent: {app_only} app-only tool(s) are attributed to the agent identity and its sponsor", [])
+    delegated = sum(1 for t in ctx.manifest.tools if t.get("auth") == "delegated")
+    return Outcome(PASS, f"Interactive agent: {delegated} tool(s) act on behalf of the signed-in user (OBO), none app-only", [])
+
+
+def check_code_auth_flow(ctx: CheckContext, rule: Rule) -> Outcome:
+    missing = _manifest_required(ctx)
+    if missing:
+        return missing
+    invocation = _invocation(ctx)
+    if invocation is None:
+        return Outcome(NOT_EVALUATED, "The manifest does not declare invocation, so the expected auth flow is unknown", [])
+    if invocation == "autonomous":
+        return Outcome(PASS, "Autonomous agent: app-only token flows are permitted", [])
+    app_only = [re.compile(p) for p in rule.params["app_only_patterns"]]
+    obo = [re.compile(p) for p in rule.params["obo_patterns"]]
+    extensions = tuple(rule.params["extensions"])
+    hits: list[str] = []
+    exchanges: list[str] = []
+    scanned = 0
+    for path, text in sorted(ctx.snapshot.files.items()):
+        if not path.endswith(extensions):
+            continue
+        scanned += 1
+        for pattern in app_only:
+            hits.extend(f"{path}:{n}" for n in _line_hits(text, pattern))
+        for pattern in obo:
+            exchanges.extend(f"{path}:{n}" for n in _line_hits(text, pattern))
+    if hits:
+        return Outcome(FAIL, "User-facing agent code requests app-only (client credentials) tokens", _cap(sorted(set(hits))))
+    if not scanned:
+        return Outcome(NOT_EVALUATED, "No matching source files to scan", [])
+    if exchanges:
+        return Outcome(PASS, "No app-only token requests; on-behalf-of exchange found", _cap(sorted(set(exchanges))))
+    return Outcome(PASS, f"No app-only token requests in {scanned} source file(s)", [])
+
+
+def check_deployed_auth(ctx: CheckContext, rule: Rule) -> Outcome:
+    if ctx.manifest is None or ctx.manifest_error:
+        return Outcome(NOT_EVALUATED, "No valid manifest declares deployments", [])
+    return deployed_auth_outcome(ctx.deployed, _invocation(ctx))
 
 
 CHECKS: dict[str, Callable[[CheckContext, Rule], Outcome]] = {
@@ -544,4 +637,7 @@ CHECKS: dict[str, Callable[[CheckContext, Rule], Outcome]] = {
     "manifest_baseline_pin": check_manifest_baseline_pin,
     "evals_in_ci": check_evals_in_ci,
     "deployed_drift": check_deployed_drift,
+    "manifest_auth_flow": check_manifest_auth_flow,
+    "code_auth_flow": check_code_auth_flow,
+    "deployed_auth": check_deployed_auth,
 }

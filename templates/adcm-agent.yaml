@@ -2,10 +2,11 @@
 schema: adcm.agent/v1
 name: my-agent
 description: What the agent does, in one sentence.
-baseline_version: 1.0.0
+baseline_version: 1.1.0
 owner: owner@contoso.com
 sponsor: sponsor@contoso.com
 data_classification: general
+invocation: interactive   # interactive (acts for a signed-in user) or autonomous
 identity:
   type: entra_agent_id
   blueprint_id: 00000000-0000-0000-0000-000000000000
@@ -20,6 +21,7 @@ tools:
     endpoint: https://learn.microsoft.com/api/mcp
     write: false
     approval: none
+    auth: delegated   # delegated (on behalf of the user), app_only or none
 telemetry:
   enabled: true
 deployments:

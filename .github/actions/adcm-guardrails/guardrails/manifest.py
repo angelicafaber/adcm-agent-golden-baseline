@@ -24,9 +24,11 @@ _ARM_ID = re.compile(
     re.IGNORECASE,
 )
 _PLATFORMS = ("foundry", "container_app", "function_app")
+INVOCATIONS = ("interactive", "autonomous")
+TOOL_AUTH = ("delegated", "app_only", "none")
 _TOP_KEYS = {
     "schema", "name", "description", "baseline_version", "owner", "sponsor", "data_classification",
-    "identity", "model", "tools", "telemetry", "deployments",
+    "invocation", "identity", "model", "tools", "telemetry", "deployments",
 }
 
 
@@ -89,6 +91,7 @@ class Manifest:
             "sponsor": self.data.get("sponsor") if isinstance(self.data.get("sponsor"), str) else None,
             "data_classification": self.data.get("data_classification") if isinstance(self.data.get("data_classification"), str) else None,
             "baseline_version": self.data.get("baseline_version") if isinstance(self.data.get("baseline_version"), str) else None,
+            "invocation": self.data.get("invocation") if self.data.get("invocation") in INVOCATIONS else None,
             "identity_type": self.get("identity", "type") if isinstance(self.get("identity", "type"), str) else None,
             "model": self.get("model", "deployment") if isinstance(self.get("model", "deployment"), str) else None,
             "tools": sorted(str(t.get("name")) for t in self.tools if isinstance(t.get("name"), str))[:MAX_TOOLS],
@@ -134,6 +137,8 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
             problems.append(f"{key} is required (user principal name)")
     if not isinstance(data.get("data_classification"), str) or not data["data_classification"]:
         problems.append("data_classification is required")
+    if "invocation" in data and data["invocation"] not in INVOCATIONS:
+        problems.append("invocation must be interactive or autonomous")
     identity = data.get("identity")
     if not isinstance(identity, dict) or set(identity) - {"type", "blueprint_id", "client_id"} or not isinstance(identity.get("type"), str):
         problems.append("identity must declare type (and blueprint_id for Entra Agent ID)")
@@ -152,8 +157,8 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
     else:
         names: set[str] = set()
         for tool in tools:
-            if not isinstance(tool, dict) or set(tool) - {"name", "type", "endpoint", "write", "approval"}:
-                problems.append("each tool needs name, type, write and optional endpoint/approval only")
+            if not isinstance(tool, dict) or set(tool) - {"name", "type", "endpoint", "write", "approval", "auth"}:
+                problems.append("each tool needs name, type, write and optional endpoint/approval/auth only")
                 continue
             if not isinstance(tool.get("name"), str) or not _NAME.fullmatch(tool["name"]) or tool["name"] in names:
                 problems.append("tool names must be unique identifiers")
@@ -165,6 +170,8 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
                 problems.append(f"tool {tool.get('name')!s:.40}: endpoint must be a plain https URL")
             if "approval" in tool and tool["approval"] not in ("required", "none"):
                 problems.append(f"tool {tool.get('name')!s:.40}: approval must be required or none")
+            if "auth" in tool and tool["auth"] not in TOOL_AUTH:
+                problems.append(f"tool {tool.get('name')!s:.40}: auth must be delegated, app_only or none")
     telemetry = data.get("telemetry")
     if not isinstance(telemetry, dict) or set(telemetry) - {"enabled"} or type(telemetry.get("enabled")) is not bool:
         problems.append("telemetry must declare enabled: true|false")

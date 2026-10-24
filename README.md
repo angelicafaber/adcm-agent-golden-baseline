@@ -18,7 +18,7 @@ MCP allow-lists, telemetry, evaluations and declared-vs-deployed drift.
    baseline version; Dependabot proposes upgrades as pull requests.
 
 ```yaml
-- uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@<commit-sha> # v1.0.0
+- uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@<commit-sha> # v1.1.0
   with:
     fail-on: high   # high, medium or low
 ```
@@ -28,7 +28,7 @@ summary, and saves a JSON report. Controls that need the GitHub API (branch rule
 signatures) or the ADCM inventory (deployed drift) are reported as "not evaluated" in CI and
 evaluated by ADCM.
 
-## Controls (v1.0.0)
+## Controls (v1.1.0)
 
 See [`agent-baseline.json`](agent-baseline.json) for the rule definitions and [`CHANGELOG.md`](CHANGELOG.md)
 for version history. The action's engine is vendored from ADCM (`src/guardrails`); do not edit it here.
