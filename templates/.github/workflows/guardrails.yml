@@ -12,6 +12,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@d4c9962059b3bf75d7dd557cba2adede937c2281 # v1.1.0
+      - uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@e8c93da66524b78a5d6c6a28cf8e15899462d55c # v1.1.0
         with:
           fail-on: high
