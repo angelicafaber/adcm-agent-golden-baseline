@@ -1,4 +1,4 @@
-# ADCM agent golden baseline
+# ADCM agent golden repo
 
 The approved, versioned security and governance configuration for AI agent repositories.
 ADCM (Agent Discovery and Capability Mapping) scans agent repositories and their deployed
@@ -18,7 +18,7 @@ MCP allow-lists, telemetry, evaluations and declared-vs-deployed drift.
    baseline version; Dependabot proposes upgrades as pull requests.
 
 ```yaml
-- uses: angelicafaber/adcm-agent-golden-baseline/.github/actions/adcm-guardrails@<commit-sha> # v1.1.0
+- uses: angelicafaber/adcm-agent-golden-repo/.github/actions/adcm-guardrails@<commit-sha> # v1.1.0
   with:
     fail-on: high   # high, medium or low
 ```
